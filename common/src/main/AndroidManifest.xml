@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.myplayer.media">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+
+
+    <application>
+        <!--
+             MediaSession, prior to API 21, uses a broadcast receiver to communicate with a
+             media session. It doesn't have to be this broadcast receiver, but it must
+             handle the action "android.intent.action.MEDIA_BUTTON".
+
+             Additionally, this is used to  resume the service from an inactive state upon
+             receiving a media button event (such as "play")
+        -->
+
+        <receiver android:name="androidx.media.session.MediaButtonReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON"/>
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:authorities="com.example.myplayer.media.library.provider"
+            android:name= ".library.AlbumArtContentProvider"
+            android:exported="true"/>
+
+    </application>
+
+</manifest>
