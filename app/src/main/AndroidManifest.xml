@@ -41,6 +41,19 @@
 
         <service android:name=".MediaPlayerService"/>
 
+        <!--
+        Declare the common MediaBrowserService for use in the mobile app, including android auto app
+        -->
+        <service
+            android:name=".media.MusicService"
+            android:enabled="true"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService"/>
+            </intent-filter>
+        </service>
+
 
     </application>
 
