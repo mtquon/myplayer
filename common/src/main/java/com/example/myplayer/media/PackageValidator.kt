@@ -47,6 +47,7 @@ class PackageValidator(context: Context, @XmlRes xmlResId: Int) {
         this.packageManager = this.context.packageManager
 
         certificateAllowList = buildCertificateAllowList(parser)
+
         platformSignature = getSystemSignature()
     }
 
@@ -203,9 +204,9 @@ class PackageValidator(context: Context, @XmlRes xmlResId: Int) {
         )
 
 
-
-
+    //TODO: fix below
     private fun buildCertificateAllowList(parser: XmlResourceParser): Map<String, PackageValidator.KnownCallerInfo> {
+
         val certificateAllowList = LinkedHashMap<String, KnownCallerInfo>()
         try{
             var eventType = parser.next()
@@ -219,9 +220,17 @@ class PackageValidator(context: Context, @XmlRes xmlResId: Int) {
 
                     callerInfo?.let{ info ->
                         val packageName = info.packageName
+                        val existingCallerInfo = certificateAllowList[packageName]
+                        if (existingCallerInfo != null) {
+                            existingCallerInfo.signatures += callerInfo.signatures
+                        }else{
+                            certificateAllowList[packageName] = callerInfo
+                        }
 
                     }
                 }
+                eventType = parser.next()
+
             }
 
         }catch (xmlException: XmlPullParserException){
@@ -229,7 +238,6 @@ class PackageValidator(context: Context, @XmlRes xmlResId: Int) {
         }catch(ioException: IOException){
             Log.e(TAG,"Could not read allowed callers form XML",ioException)
         }
-
         return certificateAllowList
     }
 

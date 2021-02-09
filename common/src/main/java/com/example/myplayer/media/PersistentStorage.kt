@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
 
 class PersistentStorage private constructor(val context: Context){
     /**
-     * Store any  daya which must persist between restarts, such as the most recently played song.
+     * Store any  data which must persist between restarts, such as the most recently played song.
      */
 
     private var preferences: SharedPreferences = context.getSharedPreferences(
@@ -24,14 +24,15 @@ class PersistentStorage private constructor(val context: Context){
     )
 
     companion object{
+
         @Volatile
         private var instance: PersistentStorage? = null
 
-        fun getInstance(context: Context){
-            instance ?: synchronized(this){
+        fun getInstance(context: Context) =
+            instance ?: synchronized(this) {
                 instance ?: PersistentStorage(context).also { instance = it }
             }
-        }
+
     }
 
     suspend fun saveRecentSong(description: MediaDescriptionCompat, position: Long){

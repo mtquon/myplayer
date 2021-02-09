@@ -217,6 +217,11 @@ class MainActivity : AppCompatActivity() {
                 val contentUri: Uri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
                 )
+                Log.d("query", "DATA: ${data}")
+                Log.d("query", "TITLE: ${title}")
+                Log.d("query", "ALBUM: ${album}")
+                Log.d("query", "ARTIST: ${artist}")
+                Log.d("query", "ID: ${id}")
 
 
                 //Stores column values and the contentUri in a local object that represent the media file

@@ -1,3 +1,4 @@
+include ':mediacontroller'
 include ':common'
 include ':app'
 rootProject.name = "MyPlayer"

@@ -33,7 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-
+import org.json.JSONObject
 
 
 /**
@@ -69,7 +69,9 @@ open class MusicService : MediaBrowserServiceCompat() {
     private var currentPlayListItems: List<MediaMetadataCompat> = emptyList()
 
     private lateinit var storage: PersistentStorage
+
     private var resumePosition: Int?=null
+
 
     /**
      * This must be `by lazy` because the source won't initially be ready
@@ -89,6 +91,8 @@ open class MusicService : MediaBrowserServiceCompat() {
 
         //AudioPlayer notification ID
         private const val NOTIFICATION_ID = 101
+
+
     }
 
 
@@ -102,7 +106,7 @@ open class MusicService : MediaBrowserServiceCompat() {
     @ExperimentalCoroutinesApi
     override fun onCreate(){
         super.onCreate()
-
+        Log.d(TAG,"starting onCreate method")
 
 
         //Build a PendingIntent that can be used to launch the UI
@@ -112,6 +116,7 @@ open class MusicService : MediaBrowserServiceCompat() {
             }
 
         //Create a new MediaSession
+
         mediaSession = MediaSessionCompat(this,TAG)
             .apply {
                 //Enable callbacks from MediaButtons and TransportControls
@@ -165,8 +170,34 @@ open class MusicService : MediaBrowserServiceCompat() {
                 setSessionToken(sessionToken)
             }
 
+        /**
+         * In order for [MediaBrowserCompat.ConnectionCallback.onConnected] to be called,
+         * a [MediaSessionCompat.Token] needs to be set on the [MediaBrowserServiceCompat].
+         *
+         * It is possible to wait to set the session token, if required for a specific use-case.
+         * However, the token *must* be set by the time [MediaBrowserServiceCompat.onGetRoot]
+         * returns, or the connection will fail silently. (The system will not even call
+         * [MediaBrowserCompat.ConnectionCallback.onConnectionFailed].)
+         */
+        //sessionToken=mediaSession.sessionToken
+
+        //TODO: fix validator, not working
+        packageValidator= PackageValidator(this,R.xml.allowed_media_browser_callers)
+
+        Log.d(TAG,"init storage")
+
+
+        storage = PersistentStorage.getInstance(applicationContext)
+
+        Log.d(TAG,"goign to load audio")
         //TODO:add mediastore methods, store local songs, make tree of media here.
         //TODO: make datasource the local files from mediastore
+
+
+        loadAudio()
+
+
+
     }
 
 
@@ -183,7 +214,9 @@ open class MusicService : MediaBrowserServiceCompat() {
          */
 
         //TODO: decide if needed
-        val isKnownCaller = packageValidator.isKnownCaller(clientPackageName,clientUid)
+
+        //val isKnownCaller = packageValidator.isKnownCaller(clientPackageName,clientUid)
+        val isKnownCaller= true
         val rootExtras = Bundle().apply{
             putBoolean(
                     MEDIA_SEARCH_SUPPORTED,
@@ -258,6 +291,79 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
 
+    private fun loadAudio(){
+        //Container for info about each audio file
+        Log.d(TAG,"loadAudio started")
+        var jsonMusicCatalog = "{\"music\": ["
+
+        val collection =
+                if(Build.VERSION.SDK_INT >=Build.VERSION_CODES.Q){
+                    MediaStore.Audio.Media.getContentUri(
+                            MediaStore.VOLUME_EXTERNAL
+                    )
+                }else{
+                   MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                }
+
+        //show only music files
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+
+        //Display music files in alphabetical order based on their title
+        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+
+
+        val query = contentResolver.query(
+                collection,
+                null,
+                selection,
+                null,
+                sortOrder
+        )
+
+        query?.use{ cursor ->
+            //Cache column indices
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+            val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+            val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+
+            while(cursor.moveToNext()){
+                //Get values of column for music
+                val displayName= cursor.getString(displayNameColumn)
+                val title = cursor.getString(titleColumn)
+                val id = cursor.getLong(idColumn)
+                val album= cursor.getString(albumColumn)
+                val artist = cursor.getString(artistColumn)
+                Log.d("query", "query size is ${query?.columnCount}")
+
+                val contentUri: Uri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,id
+                )
+
+                Log.d("query", "DATA: ${displayName}")
+                Log.d("query", "TITLE: ${title}")
+                Log.d("query", "ALBUM: ${album}")
+                Log.d("query", "ARTIST: ${artist}")
+                Log.d("query", "ID: ${id}")
+                Log.d("query","contentURI: ${contentUri}")
+                //Store column values and teh contentUri in a local object that represents the medial file
+                //TODO: either change jsonsource or make json formatted data from mediastore
+                jsonMusicCatalog+="""{"id": ${id},"title":${title},"album":${album},"artist":${artist},"source":${contentUri},"data":${displayName}},"""
+
+            }
+
+            /* mediaSource = JsonSource(source = contentUri)
+               serviceScope.launch {
+                   mediaSource.load()
+
+               }*/
+        }
+        jsonMusicCatalog=jsonMusicCatalog.dropLast(1)
+        jsonMusicCatalog+= "]}"
+
+        Log.d("query catalog",jsonMusicCatalog)
+    }
 
     private fun removeNotification(){
         var notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
