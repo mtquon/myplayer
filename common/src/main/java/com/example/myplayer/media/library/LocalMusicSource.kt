@@ -1,34 +1,40 @@
 package com.example.myplayer.media.library
 
+import android.content.ContentUris
+import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
-import android.support.v4.media.MediaBrowserCompat.MediaItem
-import android.support.v4.media.MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
 import android.util.Log
-import androidx.annotation.RequiresApi
+import com.example.myplayer.media.R
 import com.example.myplayer.media.extensions.*
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.IOException
-import java.io.InputStream
 import java.io.InputStreamReader
+import java.lang.Exception
 import java.net.URL
 import java.util.concurrent.TimeUnit
 
 /**
- *Source of [MediaMetaddataCompat] object created from a basic JSON stream.
  *
- * The definition of the JSON is specified in the docs of [JsonMusic] in this file,
- * which is the object representation of it.
- * TODO: Grab sources from andorid device locally
+ *
+ *
+ */
+/**
+ *Source of [MediaMetaddataCompat] object created from a json string of all
+ * local media files obtained from [MediaStore.Audio.Media]
  */
 
-class JsonSource(private val source: Uri) : AbstractMusicSource(){
+class LocalMusicSource(private val sourceCat: String) : AbstractMusicSource(){
     private var catalog: List<MediaMetadataCompat> = emptyList()
 
     init{
@@ -38,7 +44,8 @@ class JsonSource(private val source: Uri) : AbstractMusicSource(){
     override fun iterator(): Iterator<MediaMetadataCompat> = catalog.iterator()
 
     override suspend fun load() {
-        updateCatalog(source)?.let{ updatedCatalog ->
+        Log.d(TAG,"creating local music source on load")
+        updateCatalog(sourceCat)?.let{ updatedCatalog ->
             catalog = updatedCatalog
             state = STATE_INITIALIZED
         } ?: run {
@@ -54,52 +61,39 @@ class JsonSource(private val source: Uri) : AbstractMusicSource(){
      */
 
 
-    private suspend fun updateCatalog(catalogUri: Uri): List<MediaMetadataCompat>?{
+    private suspend fun updateCatalog(catalogUri: String): List<MediaMetadataCompat>?{
+        Log.d(TAG,"updating catalog")
         return withContext(Dispatchers.IO){
             val musicCat=try{
+                Log.d(TAG, downloadJson(catalogUri).toString())
                 downloadJson(catalogUri)
             }catch (ioException: IOException){
                 return@withContext null
             }
-
-
-            //TODO: remove
-
-           /* musicCat.music.forEach{ it ->
-
-                Log.d("JsonSource","music is ${it.genre},${it.duration},${it.album},${it.artist},${it.image},${it.source}")
-
+            //debug music catalog items
+           /*musicCat.music.forEach{
+                Log.d(TAG,"id: ${it.id }, genre: ${it.genre}, duration: ${it.duration},album: ${it.album},artist: ${it.artist},image: ${it.image},source: ${it.source},title: ${it.title},tracknumber: ${it.trackNumber},data: ${it.data}")
             }*/
 
-
-
-
-            //Get the base URI to fix up relative reference later
-            val baseUri= catalogUri.toString().removeSuffix(catalogUri.lastPathSegment ?:"")
-
             val mediaMetadataCompats = musicCat.music.map{ song->
-                //The JSON may have paths that are relative to the soruce of the JSON itslef.
-                //We need to fix them up to turn them into absolute paths.
-                catalogUri.scheme?.let { scheme->
-                    if(!song.source.startsWith(scheme)){
-                        song.source = baseUri + song.source
-                    }
-                    if(!song.image.startsWith(scheme)) {
-                        song.image= baseUri + song.image
-                    }
-                }
-
                 MediaMetadataCompat.Builder()
-                    .from(song)
-                    .apply{
-                        displayIconUri = song.image //Used by Notification
-                        albumArtUri = song.image
-                    }
-                    .build()
+                        .from(song)
+                        .apply{
+                            displayIconUri = song.source //Used by Notification
+                            albumArtUri = song.source
+                        }
+                        .build()
             }.toList()
+            Log.d(TAG,"mediametadata $mediaMetadataCompats")
             //Add description keys to be used by the Exoplayer media session extension when
             //announcing metadat changes.
-            //TODO: Remove?
+
+            Log.d(TAG,"MediaMetaDataCompats media Metadata: ${mediaMetadataCompats.forEach { it.mediaMetadata }}")
+            Log.d(TAG,"MediaMetaDataCompats media bundle: ${mediaMetadataCompats.forEach { it.bundle }}")
+            Log.d(TAG,"MediaMetaDataCompats media extras: ${mediaMetadataCompats.forEach { it.description.extras }}")
+            Log.d(TAG,"MediaMetaDataCompats media description: ${mediaMetadataCompats.forEach { it.description }}")
+
+
             mediaMetadataCompats.forEach{it.description.extras?.putAll(it.bundle)}
             mediaMetadataCompats
         }
@@ -113,19 +107,20 @@ class JsonSource(private val source: Uri) : AbstractMusicSource(){
      *
      */
     @Throws(IOException::class)
-    private fun downloadJson(catalogUri: Uri): JsonCatalog {
-        val catalogConn= URL(catalogUri.toString())
-        val reader = BufferedReader(InputStreamReader(catalogConn.openStream()))
-        return Gson().fromJson(reader, JsonCatalog::class.java)
+    private fun downloadJson(catalog: String): LocalMusicCatalog {
+        val reader = catalog
+        Log.d(TAG,"read in download json is $reader")
+        Gson().fromJson(catalog, LocalMusicCatalog::class.java).music.forEach {   Log.d(TAG,"gson: ${it.id}") }
+        return Gson().fromJson(catalog, LocalMusicCatalog::class.java)
     }
-
 }
 
 /**
  * Wrapper object for our JSON in order to be processed easily by GSON.
  */
-class JsonCatalog {
-    var music: List<JsonMusic> = ArrayList()
+class LocalMusicCatalog {
+
+    var music: List<LocalMusic> = ArrayList()
 }
 
 /**
@@ -138,7 +133,8 @@ class JsonCatalog {
  *     "artist" : // Artist of the piece of music
  *     "genre" : // Primary genre of the music
  *     "source" : // Path to the music, which may be relative
- *     "image" : // Path to the art for the music, which may be relative
+ *     //TODO: refactor this
+ *     "image" : // Path to the art for the music, we use the content uri which is source above
  *     "trackNumber" : // Track number
  *     "totalTrackCount" : // Track count
  *     "duration" : // Duration of the music in seconds
@@ -161,7 +157,7 @@ class JsonCatalog {
  */
 
 @Suppress("unused")
-class JsonMusic{
+class LocalMusic{
     var id: String=""
     var title: String=""
     var album: String=""
@@ -173,45 +169,49 @@ class JsonMusic{
     var totalTrackCount: Long = 0
     var duration: Long = -1
     var site: String = ""
+    var data: String = ""
 }
 
 /**
  * Extension method for [MediaMetadataCompat.Builder] to set the fields from our JSON
  * constructed object (to make the code a bit easier to see)
- * TODO: Might have to remove (or change) since we use local source
+ *
  */
 
-fun MediaMetadataCompat.Builder.from(jsonMusic: JsonMusic):MediaMetadataCompat.Builder{
+fun MediaMetadataCompat.Builder.from(localMusic: LocalMusic):MediaMetadataCompat.Builder{
     //The duration from the JSON is given in seconds, but the rest of the code work in
     //milliseconds. Here's where we convert to the proper units.
-    val durationMs= TimeUnit.SECONDS.toMillis(jsonMusic.duration)
+    val durationMs= TimeUnit.SECONDS.toMillis(localMusic.duration)
 
-    id= jsonMusic.id
-    title = jsonMusic.title
-    artist= jsonMusic.artist
-    album= jsonMusic.album
-    duration = jsonMusic.duration
-    genre= jsonMusic.genre
-    mediaUri= jsonMusic.source
-    albumArtUri= jsonMusic.image
-    trackNumber= jsonMusic.trackNumber
-    trackCount =jsonMusic.totalTrackCount
-    flag= MediaItem.FLAG_PLAYABLE
+    id= localMusic.id
+    title = localMusic.title
+    artist= localMusic.artist
+    album= localMusic.album
+    duration = localMusic.duration
+    genre= localMusic.genre
+    mediaUri= localMusic.source
+    albumArtUri= localMusic.source
+    trackNumber= localMusic.trackNumber
+    trackCount =localMusic.totalTrackCount
+    flag= MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
 
     //Too make things easier for *displaying* these, set the display properties as well
-    displayTitle =jsonMusic.title
-    displaySubtitle=jsonMusic.artist
-    displayDescription=jsonMusic.album
-    displayIconUri=jsonMusic.image
+    displayTitle =localMusic.title
+    displaySubtitle=localMusic.artist
+    displayDescription=localMusic.album
+    displayIconUri=localMusic.source
 
     /** Add downloadStatus to force the creation of an "extras" bundle in the resulting
      * [MediaMetadataCompat] object. This is needed to send accurate metadat to the media session
      * during updates
      */
-    downloadStatus= STATUS_NOT_DOWNLOADED
+    downloadStatus= MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
 
     //Allow it to be used in typical builder stle
     return this
 
 }
+
+private const val TAG= "LocalMusicSource"
+
 

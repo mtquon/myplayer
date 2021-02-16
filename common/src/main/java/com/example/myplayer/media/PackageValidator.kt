@@ -204,7 +204,6 @@ class PackageValidator(context: Context, @XmlRes xmlResId: Int) {
         )
 
 
-    //TODO: fix below
     private fun buildCertificateAllowList(parser: XmlResourceParser): Map<String, PackageValidator.KnownCallerInfo> {
 
         val certificateAllowList = LinkedHashMap<String, KnownCallerInfo>()

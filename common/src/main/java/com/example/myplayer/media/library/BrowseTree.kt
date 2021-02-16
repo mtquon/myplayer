@@ -5,6 +5,7 @@ import android.media.browse.MediaBrowser
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaMetadataCompat
+import android.util.Log
 import com.example.myplayer.media.R
 import com.example.myplayer.media.extensions.*
 
@@ -110,12 +111,22 @@ class BrowseTree(
      */
     private fun buildAlbumRoot(mediaItem: MediaMetadataCompat): MutableList<MediaMetadataCompat> {
         val albumMetadata = MediaMetadataCompat.Builder().apply {
+            Log.d("BrowseTree","building album root")
+
             id= mediaItem.album.urlEncoded
             title= mediaItem.album
             artist=mediaItem.artist
             albumArt=mediaItem.albumArt
             albumArtUri=mediaItem.albumArtUri.toString()
             flag= MediaItem.FLAG_BROWSABLE
+            Log.d("BrowseTree",""" 
+                updating album meta data:
+                id= ${mediaItem.album.urlEncoded}
+                title= ${mediaItem.album}
+                artist=${mediaItem.artist}
+                albumArt=${mediaItem.albumArt}
+                albumArtUri=${mediaItem.albumArtUri.toString()}                
+            """.trimIndent())
         }.build()
 
         // Adds this album to the 'Albums' category.

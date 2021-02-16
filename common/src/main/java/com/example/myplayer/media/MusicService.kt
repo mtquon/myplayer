@@ -1,39 +1,35 @@
 package com.example.myplayer.media
 
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ContentUris
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.session.MediaSessionManager
-import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.service.media.MediaBrowserService
-import androidx.media.MediaBrowserServiceCompat.BrowserRoot.EXTRA_RECENT
 import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.media.MediaBrowserServiceCompat
+import androidx.media.MediaBrowserServiceCompat.BrowserRoot.EXTRA_RECENT
 import com.example.myplayer.common.PlaybackStatus
 import com.example.myplayer.media.extensions.album
 import com.example.myplayer.media.extensions.artist
 import com.example.myplayer.media.extensions.flag
 import com.example.myplayer.media.extensions.title
 import com.example.myplayer.media.library.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import org.json.JSONObject
+import kotlinx.coroutines.*
+import java.lang.Exception
 
 
 /**
@@ -79,7 +75,7 @@ open class MusicService : MediaBrowserServiceCompat() {
      */
 
     private val browseTree: BrowseTree by lazy {
-        BrowseTree(applicationContext,mediaSource)
+        BrowseTree(applicationContext, mediaSource)
     }
 
     companion object{
@@ -96,6 +92,8 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
 
+
+
     /**
      * TODO: create a CastPlayer to handle ocmmunication with a cast session
      *
@@ -106,18 +104,18 @@ open class MusicService : MediaBrowserServiceCompat() {
     @ExperimentalCoroutinesApi
     override fun onCreate(){
         super.onCreate()
-        Log.d(TAG,"starting onCreate method")
+        Log.d(TAG, "starting onCreate method")
 
 
         //Build a PendingIntent that can be used to launch the UI
         val sessionActivityPendingIntent=
             packageManager?.getLaunchIntentForPackage(packageName)?.let { sessionIntent ->
-                PendingIntent.getActivity(this,0,sessionIntent,0)
+                PendingIntent.getActivity(this, 0, sessionIntent, 0)
             }
 
         //Create a new MediaSession
 
-        mediaSession = MediaSessionCompat(this,TAG)
+        mediaSession = MediaSessionCompat(this, TAG)
             .apply {
                 //Enable callbacks from MediaButtons and TransportControls
                 setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
@@ -129,7 +127,7 @@ open class MusicService : MediaBrowserServiceCompat() {
                 setPlaybackState(stateBuilder.build())
 
                 //MySessionCallback() has methods that handle callbacks from a media controller
-                setCallback(object : MediaSessionCompat.Callback(){
+                setCallback(object : MediaSessionCompat.Callback() {
                     override fun onPlay() {
                         super.onPlay()
                         resumeMedia()
@@ -181,17 +179,11 @@ open class MusicService : MediaBrowserServiceCompat() {
          */
         //sessionToken=mediaSession.sessionToken
 
-        //TODO: fix validator, not working
-        packageValidator= PackageValidator(this,R.xml.allowed_media_browser_callers)
-
-        Log.d(TAG,"init storage")
-
-
+        packageValidator= PackageValidator(this, R.xml.allowed_media_browser_callers)
         storage = PersistentStorage.getInstance(applicationContext)
 
-        Log.d(TAG,"goign to load audio")
-        //TODO:add mediastore methods, store local songs, make tree of media here.
-        //TODO: make datasource the local files from mediastore
+        Log.d(TAG, "goign to load audio")
+
 
 
         loadAudio()
@@ -202,9 +194,9 @@ open class MusicService : MediaBrowserServiceCompat() {
 
 
     override fun onGetRoot(
-        clientPackageName: String,
-        clientUid: Int,
-        rootHints: Bundle?
+            clientPackageName: String,
+            clientUid: Int,
+            rootHints: Bundle?
     ): BrowserRoot? {
         /**
          * Control leveling of access for the specified package name.
@@ -234,7 +226,7 @@ open class MusicService : MediaBrowserServiceCompat() {
              */
             val isRecentRequest = rootHints?.getBoolean(EXTRA_RECENT) ?: false
             val browserRootPath= if(isRecentRequest) RECENT_ROOT else BROWSABLE_ROOT
-            BrowserRoot(browserRootPath,rootExtras)
+            BrowserRoot(browserRootPath, rootExtras)
         }else{
             /**
              * Caller is unknown. There are two ways to handle this:
@@ -245,7 +237,7 @@ open class MusicService : MediaBrowserServiceCompat() {
              *
              * We go with 1)
              */
-            BrowserRoot(EMPTY_ROOT,rootExtras)
+            BrowserRoot(EMPTY_ROOT, rootExtras)
         }
     }
 
@@ -255,8 +247,8 @@ open class MusicService : MediaBrowserServiceCompat() {
      * details about the relationships
      */
     override fun onLoadChildren(
-        parentId: String,
-        result: Result<List<MediaItem>>
+            parentId: String,
+            result: Result<List<MediaItem>>
     ) {
         //If the caller requests the recent root, return the most recently played song.
         if(parentId == RECENT_ROOT){
@@ -266,11 +258,11 @@ open class MusicService : MediaBrowserServiceCompat() {
             val resultSent=mediaSource.whenReady { successfullyInitialized ->
                 if(successfullyInitialized){
                     val children= browseTree[parentId]?.map { item ->
-                        MediaItem(item.description,item.flag)
+                        MediaItem(item.description, item.flag)
                     }
                     result.sendResult(children)
                 }else{
-                    mediaSession.sendSessionEvent(NETWORK_FAILURE,null)
+                    mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
                     result.sendResult(null)
                 }
             }
@@ -291,9 +283,10 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
 
-    private fun loadAudio(){
+    @SuppressLint("NewApi")
+    private  fun loadAudio(){
         //Container for info about each audio file
-        Log.d(TAG,"loadAudio started")
+        Log.d(TAG, "loadAudio started")
         var jsonMusicCatalog = "{\"music\": ["
 
         val collection =
@@ -311,7 +304,6 @@ open class MusicService : MediaBrowserServiceCompat() {
         //Display music files in alphabetical order based on their title
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
-
         val query = contentResolver.query(
                 collection,
                 null,
@@ -327,6 +319,8 @@ open class MusicService : MediaBrowserServiceCompat() {
             val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+            val durationColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+
 
             while(cursor.moveToNext()){
                 //Get values of column for music
@@ -335,34 +329,60 @@ open class MusicService : MediaBrowserServiceCompat() {
                 val id = cursor.getLong(idColumn)
                 val album= cursor.getString(albumColumn)
                 val artist = cursor.getString(artistColumn)
-                Log.d("query", "query size is ${query?.columnCount}")
+                val duration =cursor.getLong(durationColumn)
 
                 val contentUri: Uri = ContentUris.withAppendedId(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,id
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
                 )
 
+
+                /**
+                 * TODO: CODE FOR EMBEDDED THUMBNAILS FROM MP3 FILES
+                var mmr = MediaMetadataRetriever()
+                var rawArt: ByteArray?
+                var art:Bitmap?
+                var bfo = BitmapFactory.Options()
+                mmr.setDataSource(applicationContext, contentUri)
+                rawArt = mmr.embeddedPicture
+                art= if(rawArt != null){
+                   BitmapFactory.decodeByteArray(rawArt,0,rawArt.size,bfo)
+                }else{
+                    BitmapFactory.decodeResource(applicationContext.resources,R.drawable.ic_album)
+                }
+
+                **/
+                /*
                 Log.d("query", "DATA: ${displayName}")
                 Log.d("query", "TITLE: ${title}")
                 Log.d("query", "ALBUM: ${album}")
                 Log.d("query", "ARTIST: ${artist}")
                 Log.d("query", "ID: ${id}")
-                Log.d("query","contentURI: ${contentUri}")
+                Log.d("query", "contentURI: ${contentUri}")
+                Log.d("query", "DURATION: ${duration}")
+                */
+
+
                 //Store column values and teh contentUri in a local object that represents the medial file
                 //TODO: either change jsonsource or make json formatted data from mediastore
-                jsonMusicCatalog+="""{"id": ${id},"title":${title},"album":${album},"artist":${artist},"source":${contentUri},"data":${displayName}},"""
+                jsonMusicCatalog+="""{"id": "$id","title": "$title","album": "$album",
+                    |"artist": "$artist","source": "$contentUri",
+                    |"data": "$displayName", "duration": "$duration"},""".trimMargin()
 
             }
-
-            /* mediaSource = JsonSource(source = contentUri)
-               serviceScope.launch {
-                   mediaSource.load()
-
-               }*/
         }
+
         jsonMusicCatalog=jsonMusicCatalog.dropLast(1)
         jsonMusicCatalog+= "]}"
 
-        Log.d("query catalog",jsonMusicCatalog)
+        Log.d(TAG, "create local music source with json musiccatalog")
+        Log.d("query catalog", jsonMusicCatalog)
+
+
+        mediaSource = LocalMusicSource(jsonMusicCatalog)
+        //mediaSource = JsonSource(Uri.parse("https://storage.googleapis.com/uamp/catalog.json"))
+        serviceScope.launch {
+        mediaSource.load()
+        }
     }
 
     private fun removeNotification(){
@@ -371,16 +391,16 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
     private fun updateMetaData() {
-        var albumArt = BitmapFactory.decodeResource(resources,R.drawable.default_art) //TODO: replace with medias album art
+        var albumArt = BitmapFactory.decodeResource(resources, R.drawable.default_art) //TODO: replace with medias album art
         //update current metadata
         mediaSession.setMetadata(
                 MediaMetadataCompat.Builder()
-                        .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,albumArt)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,currentPlayListItems[currentPlayer.currentPosition].artist)
+                        .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, albumArt)
+                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentPlayListItems[currentPlayer.currentPosition].artist)
                         .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentPlayListItems[currentPlayer.currentPosition].album)
-                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE,currentPlayListItems[currentPlayer.currentPosition].title)
+                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentPlayListItems[currentPlayer.currentPosition].title)
                         .build()
-        //FIXME: make current audio object or fix above to ensure we get the current audio that is playing
+                //FIXME: make current audio object or fix above to ensure we get the current audio that is playing
         )
     }
 

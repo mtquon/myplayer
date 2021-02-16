@@ -115,7 +115,7 @@ abstract class AbstractMusicSource : MusicSource {
         }
 
     override fun search(query: String, extras: Bundle): List<MediaMetadataCompat> {
-        //First attempt to search with the "focus" that's provided in the extra.s
+        //First attempt to search with the "focus" that's provided in the extras
         val focusedSearchResult = when(extras[MediaStore.EXTRA_MEDIA_FOCUS]) {
             MediaStore.Audio.Genres.ENTRY_CONTENT_TYPE ->{
                 //For a genre focused search, only genre is set.
