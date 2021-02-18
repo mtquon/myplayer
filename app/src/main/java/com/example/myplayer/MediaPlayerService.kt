@@ -61,7 +61,6 @@ class MediaPlayerService: Service(), MediaPlayer.OnCompletionListener, MediaPlay
         private const val NOTIFICATION_ID = 101
 
 
-
     }
 
     //MediaSession
@@ -373,7 +372,7 @@ class MediaPlayerService: Service(), MediaPlayer.OnCompletionListener, MediaPlay
                 }
             }
         }
-        //Register the listener with the telephony manager
+        //Register the listener with the telephony manager+-
         //Listen for changes to the device call state.
         telephonyManager!!.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
 

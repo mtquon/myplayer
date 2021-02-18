@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
 
 
     companion object{
-        public const val Broadcast_PLAY_NEW_AUDIO = "com.example.myplayer.PlayNewAudio"
+        public const val Broadcast_PLAY_NEW_AUDIO = "com.example.myplayer.playNewAudio"
 
     }
 

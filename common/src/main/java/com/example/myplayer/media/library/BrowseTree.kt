@@ -1,7 +1,11 @@
 package com.example.myplayer.media.library
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.media.browse.MediaBrowser
+import android.net.Uri
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaMetadataCompat
@@ -81,9 +85,8 @@ class BrowseTree(
             val albumMediaId = mediaItem.album.urlEncoded
             val albumChildren = mediaIdToChildren[albumMediaId] ?: buildAlbumRoot(mediaItem)
             albumChildren += mediaItem
-
             //Add the first tack of each album to the Recommended catagory
-            //TODO: change to to songs
+            //TODO: instead of first track of each album list most played songs?
             if(mediaItem.trackNumber ==1L){
                 val recommendedChildren = mediaIdToChildren[RECOMMENDED_ROOT] ?: mutableListOf()
                 recommendedChildren+= mediaItem
@@ -111,22 +114,22 @@ class BrowseTree(
      */
     private fun buildAlbumRoot(mediaItem: MediaMetadataCompat): MutableList<MediaMetadataCompat> {
         val albumMetadata = MediaMetadataCompat.Builder().apply {
-            Log.d("BrowseTree","building album root")
+
 
             id= mediaItem.album.urlEncoded
             title= mediaItem.album
             artist=mediaItem.artist
-            albumArt=mediaItem.albumArt
             albumArtUri=mediaItem.albumArtUri.toString()
             flag= MediaItem.FLAG_BROWSABLE
-            Log.d("BrowseTree",""" 
+
+            /*Log.d("BrowseTree","""
                 updating album meta data:
                 id= ${mediaItem.album.urlEncoded}
                 title= ${mediaItem.album}
                 artist=${mediaItem.artist}
-                albumArt=${mediaItem.albumArt}
-                albumArtUri=${mediaItem.albumArtUri.toString()}                
-            """.trimIndent())
+                albumArtUri=${mediaItem.albumArtUri.toString()}
+            """.trimIndent())*/
+
         }.build()
 
         // Adds this album to the 'Albums' category.
@@ -146,8 +149,8 @@ const val BROWSABLE_ROOT="/"
 const val RECOMMENDED_ROOT="__RECOMMENDED__"
 const val ALBUMS_ROOT ="__ALBUMS__"
 const val RECENT_ROOT = "__RECENT__"
-const val EMPTY_ROOT ="@empoty@"
+const val EMPTY_ROOT ="@empty@"
 
 const val MEDIA_SEARCH_SUPPORTED = "android.media.browse.SEARCH_SUPPORTED"
 
-const val RESOURCE_ROOT_URI="android.resource://com.exmaple.myplayer/drawable/"
+const val RESOURCE_ROOT_URI="android.resource://com.example.myplayer/drawable/"

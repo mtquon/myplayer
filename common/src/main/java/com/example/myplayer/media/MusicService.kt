@@ -3,23 +3,30 @@ package com.example.myplayer.media
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ContentUris
-import android.content.Context
+import android.content.*
+import android.drm.DrmStore
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
+import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.session.MediaSessionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyManager
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.media.MediaBrowserServiceCompat
 import androidx.media.MediaBrowserServiceCompat.BrowserRoot.EXTRA_RECENT
 import com.example.myplayer.common.PlaybackStatus
@@ -50,18 +57,22 @@ open class MusicService : MediaBrowserServiceCompat() {
     private lateinit var packageValidator: PackageValidator
     private lateinit var stateBuilder: PlaybackStateCompat.Builder
 
-
-
     /**
      * The current player will on be a MediaPlayer for local playback
      */
-
     private lateinit var currentPlayer: MediaPlayer
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
+
+    private var telephonyManager: TelephonyManager? = null
+    private var phoneStateListener: PhoneStateListener?=null
+    private var ongoingCall: Boolean= false
+
     private lateinit var mediaSession: MediaSessionCompat
     private lateinit var mediaSessionManager: MediaSessionManager
+    private lateinit var mediaControllerCompat: MediaControllerCompat
+
     private var currentPlayListItems: List<MediaMetadataCompat> = emptyList()
 
     private lateinit var storage: PersistentStorage
@@ -101,10 +112,11 @@ open class MusicService : MediaBrowserServiceCompat() {
      */
 
 
+    @RequiresApi(Build.VERSION_CODES.M)
     @ExperimentalCoroutinesApi
     override fun onCreate(){
         super.onCreate()
-        Log.d(TAG, "starting onCreate method")
+        Log.d(TAG, "onCreate")
 
 
         //Build a PendingIntent that can be used to launch the UI
@@ -114,7 +126,6 @@ open class MusicService : MediaBrowserServiceCompat() {
             }
 
         //Create a new MediaSession
-
         mediaSession = MediaSessionCompat(this, TAG)
             .apply {
                 //Enable callbacks from MediaButtons and TransportControls
@@ -177,16 +188,27 @@ open class MusicService : MediaBrowserServiceCompat() {
          * returns, or the connection will fail silently. (The system will not even call
          * [MediaBrowserCompat.ConnectionCallback.onConnectionFailed].)
          */
-        //sessionToken=mediaSession.sessionToken
 
         packageValidator= PackageValidator(this, R.xml.allowed_media_browser_callers)
         storage = PersistentStorage.getInstance(applicationContext)
 
         Log.d(TAG, "goign to load audio")
+        var musicCatalog=loadAudio()
+
+        mediaSource = LocalMusicSource(musicCatalog)
+        //mediaSource = JsonSource(Uri.parse("https://storage.googleapis.com/uamp/catalog.json"))
+        serviceScope.launch {
+            mediaSource.load()
+        }
 
 
+        //Manage incoming phone calls during playback
+        callStateListener()
+        //change in audio outputs
+        //registerBecomingNoisyReceiver()
+        //play new audio
+        //registerPlayNewAudio()
 
-        loadAudio()
 
 
 
@@ -241,6 +263,7 @@ open class MusicService : MediaBrowserServiceCompat() {
         }
     }
 
+
     /**
      * Returns (via the [result] parameter) a list of [MediaItem]s that are child items of
      * the provided [parentMediaID]. See [BrowseTree] for more details on how this is build/more
@@ -283,8 +306,78 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
 
+
+
+    //Handle incoming calls
+    private fun callStateListener(){
+        //Get telephony manager
+        telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+        //Start listening for phonestate changes
+        phoneStateListener = object : PhoneStateListener(){
+            override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                when(state){
+                    //if at least one call exists or the phone is ringing pause the MediaPlayer
+                    TelephonyManager.CALL_STATE_OFFHOOK, TelephonyManager.CALL_STATE_RINGING-> if(currentPlayer != null){
+                        pauseMedia()
+                        ongoingCall=true
+                    }
+                    //Phone idle. start playing
+                    TelephonyManager.CALL_STATE_IDLE ->
+                        if(currentPlayer!=null){
+                            if(ongoingCall){
+                                ongoingCall=false
+                                resumeMedia()
+                            }
+                        }
+                }
+            }
+        }
+        //Register the listener with the telephony manager
+        //Listen for changes to the device call state
+        telephonyManager!!.listen(phoneStateListener,PhoneStateListener.LISTEN_CALL_STATE)
+    }
+
+    //Becoming noisy
+   private val becomingNoiseReceiver: BroadcastReceiver = object: BroadcastReceiver(){
+        override fun onReceive(context: Context, intent: Intent) {
+            TODO("Not yet implemented")
+        }
+   }
+   private fun registerBecomingNoisyReceiver(){
+        //register after getting audio focus
+        var intentFilter: IntentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        registerReceiver(becomingNoiseReceiver,intentFilter)
+   }
+
+   /* private val playNewAudio= object : BroadcastReceiver(){
+        //TODO: make this compatable with persistent storage and musicsource
+        override fun onReceive(context: Context?, intent: Intent?) {
+            //get the new media index from from SharedPReferences
+            audioIndex = StorageUtil(applicationContext).loadAudioIndex()
+            if(audioIndex != -1 && audioIndex < audioList!!.size){
+                //index is in valid range
+                activeAudio= audioList!![audioIndex]
+            }else{
+                stopSelf()
+            }
+            //A PLAY_NEW_AUDIO action received
+            //reset mediaPlayer to play the new audio
+            stopMedia()
+            currentPlayer?.reset()
+            initMediaPlayer()
+            updateMetaData()
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+
+    private fun registerPlayNewAudio(){
+        //register playNewMedia receiver
+        var filter = IntentFilter(BROADCAST_PLAY_NEW_AUDIO)
+        registerReceiver(playNewAudio,filter)
+    }*/
+
     @SuppressLint("NewApi")
-    private  fun loadAudio(){
+    private  fun loadAudio(): String {
         //Container for info about each audio file
         Log.d(TAG, "loadAudio started")
         var jsonMusicCatalog = "{\"music\": ["
@@ -377,12 +470,7 @@ open class MusicService : MediaBrowserServiceCompat() {
         Log.d(TAG, "create local music source with json musiccatalog")
         Log.d("query catalog", jsonMusicCatalog)
 
-
-        mediaSource = LocalMusicSource(jsonMusicCatalog)
-        //mediaSource = JsonSource(Uri.parse("https://storage.googleapis.com/uamp/catalog.json"))
-        serviceScope.launch {
-        mediaSource.load()
-        }
+        return jsonMusicCatalog
     }
 
     private fun removeNotification(){
@@ -420,6 +508,7 @@ open class MusicService : MediaBrowserServiceCompat() {
     fun buildNotification(any: Any) {
         //TODO
     }
+
 }
 
 
@@ -433,3 +522,7 @@ private const val CONTENT_STYLE_PLAYABLE_HINT = "android.media.browse.CONTENT_ST
 private const val CONTENT_STYLE_SUPPORTED = "android.media.browse.CONTENT_STYLE_SUPPORTED "
 private const val CONTENT_STYLE_LIST = 1
 private const val CONTENT_STYLE_GRID = 2
+
+private const val BROADCAST_PLAY_NEW_AUDIO="com.exmaple.myplayer.common.PlayNewAudio"
+
+
