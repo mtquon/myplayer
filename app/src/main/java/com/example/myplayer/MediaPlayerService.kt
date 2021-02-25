@@ -49,7 +49,7 @@ class MediaPlayerService: Service(), MediaPlayer.OnCompletionListener, MediaPlay
     private var activeAudio: Audio? = null //an object of the currently playing audio
 
     companion object{
-        public val ACTION_PLAY = "com.example.myplayer.ACTION_PLAY"
+        const val ACTION_PLAY = "com.example.myplayer.ACTION_PLAY"
         public val ACTION_PAUSE = "com.example.myplayer.ACTION_PAUSE"
         public val ACTION_PREVIOUS = "com.example.myplayer.ACTION_PREVIOUS"
         public val ACTION_NEXT ="com.example.myplayer.ACTION_NEXT"

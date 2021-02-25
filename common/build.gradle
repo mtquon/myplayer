@@ -45,4 +45,24 @@ dependencies {
     // Glide dependencies
     api "com.github.bumptech.glide:glide:$glide_version"
     kapt "com.github.bumptech.glide:compiler:$glide_version"
+
+    //ExoPlayer dependencies
+
+    /**
+     * This allows UAMP to utilize a local version of ExoPlayer, which is used to extend the
+     * MediaSession extension, as well as for testing, and customization
+     */
+    if(findProject(':exoplayer-library-core')!=null){
+        api project(':exoplayer-library-core')
+        api project(':exoplayer-library-ui')
+        api project(':exoplayer-extension-mediasession')
+        api project(':exoplayer-extension-cast')
+    }else{
+        api "com.google.android.exoplayer:exoplayer-core:$exoplayer_version"
+        api "com.google.android.exoplayer:exoplayer-ui:$exoplayer_version"
+        api "com.google.android.exoplayer:extension-mediasession:$exoplayer_version"
+        api "com.google.android.exoplayer:extension-cast:$exoplayer_version"
+    }
+
+
 }
