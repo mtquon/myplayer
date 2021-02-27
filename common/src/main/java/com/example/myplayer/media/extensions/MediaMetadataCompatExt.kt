@@ -2,10 +2,13 @@ package com.example.myplayer.media.extensions
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.MediaStore
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaMetadataCompat
-
-
+import com.google.android.exoplayer2.source.ConcatenatingMediaSource
+import com.google.android.exoplayer2.source.ProgressiveMediaSource
+import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
+import com.google.android.gms.cast.MediaQueueItem
 
 
 /**
@@ -236,7 +239,28 @@ inline var MediaMetadataCompat.Builder.flag: Int
         putLong(METADATA_KEY_FLAGS, value.toLong())
     }
 
+/**
+ * Extension method for building [ExtractorMediaSource] from a [MediaMetadatCompat] object.
+ *
+ * place the [MediaDescriptionCompat]into the tag so it can be retrieved later
+ */
 
+fun MediaMetadataCompat.toMediaSource(dataSourceFactory: DefaultDataSourceFactory) =
+        ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(mediaUri)
+
+/**
+ * Extension method for building a [ConcatenatingMediaSource] give a [List] of
+ * [MediaMetadataCompat] objects
+ */
+fun List<MediaMetadataCompat>.toMediaSource(
+        dataSourceFactory: DefaultDataSourceFactory
+): ConcatenatingMediaSource{
+    val concatenatingMediaSource = ConcatenatingMediaSource()
+    forEach {
+        concatenatingMediaSource.addMediaSource(it.toMediaSource(dataSourceFactory))
+    }
+    return concatenatingMediaSource
+}
 
 
 //TODO: Add cast functions toMediaQueueItem() and toCastMediaMetadata()

@@ -1,42 +1,34 @@
 package com.example.myplayer.media
 
-import android.annotation.SuppressLint
-import android.app.NotificationManager
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.*
-import android.drm.DrmStore
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ColorSpace
-import android.media.AudioManager
-import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
-import android.media.session.MediaSessionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.ContactsContract
+import android.os.ResultReceiver
 import android.provider.MediaStore
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaBrowserCompat.MediaItem
+import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
-import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
-import android.telephony.PhoneStateListener
-import android.telephony.TelephonyManager
 import android.util.Log
-import androidx.annotation.RequiresApi
+import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.media.MediaBrowserServiceCompat
 import androidx.media.MediaBrowserServiceCompat.BrowserRoot.EXTRA_RECENT
-import com.example.myplayer.common.PlaybackStatus
-import com.example.myplayer.media.extensions.album
-import com.example.myplayer.media.extensions.artist
-import com.example.myplayer.media.extensions.flag
-import com.example.myplayer.media.extensions.title
+import com.example.myplayer.media.extensions.*
 import com.example.myplayer.media.library.*
+import com.google.android.exoplayer2.*
+import com.google.android.exoplayer2.audio.AudioAttributes
+import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
+import com.google.android.exoplayer2.ext.mediasession.TimelineQueueNavigator
+import com.google.android.exoplayer2.ui.PlayerNotificationManager
+import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
+import com.google.android.exoplayer2.util.Util
 import kotlinx.coroutines.*
-import java.lang.Exception
 
 
 /**
@@ -48,7 +40,6 @@ import java.lang.Exception
  *
  * TODO: add support for cast sessions
  */
-private const val MY_MEDIA_ROOT_ID ="media_root_id"
 
 
 open class MusicService : MediaBrowserServiceCompat() {
@@ -58,27 +49,21 @@ open class MusicService : MediaBrowserServiceCompat() {
     private lateinit var stateBuilder: PlaybackStateCompat.Builder
 
     /**
-     * The current player will on be a MediaPlayer for local playback
+     * The current player will on be  ExoPlayer for localplayback or a CastPlayer for remote playback
      */
-    private lateinit var currentPlayer: MediaPlayer
+    private lateinit var currentPlayer: Player
+
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
 
-    private var telephonyManager: TelephonyManager? = null
-    private var phoneStateListener: PhoneStateListener?=null
-    private var ongoingCall: Boolean= false
-
     private lateinit var mediaSession: MediaSessionCompat
-    private lateinit var mediaSessionManager: MediaSessionManager
-    private lateinit var mediaControllerCompat: MediaControllerCompat
-
+    private lateinit var mediaSessionConnector: MediaSessionConnector
     private var currentPlayListItems: List<MediaMetadataCompat> = emptyList()
 
     private lateinit var storage: PersistentStorage
-
-    private var resumePosition: Int?=null
-
+    private var isForegroundService=false
+    private val playerListener = PlayerEventListener()
 
     /**
      * This must be `by lazy` because the source won't initially be ready
@@ -89,35 +74,39 @@ open class MusicService : MediaBrowserServiceCompat() {
         BrowseTree(applicationContext, mediaSource)
     }
 
-    companion object{
-        public val ACTION_PLAY="com.example.myplayer.common.ACTION_PLAY"
-        public val ACTION_PAUSE= "com.example.myplayer.common.ACTION_PAUSE"
-        public val ACTION_PREVIOUS= "com.example.myplayer.common.ACTION_PREVIOUS"
-        public val ACTION_NEXT= "com.example.myplayer.ACTION_NEXT"
-        public val ACTION_STOP = "com.exmaple.myplayer.ACTION_STOP"
-
-        //AudioPlayer notification ID
-        private const val NOTIFICATION_ID = 101
-
-
+    private val dataSourceFactory: DefaultDataSourceFactory by lazy {
+        DefaultDataSourceFactory(
+                this,
+                Util.getUserAgent(this, USER_AGENT),
+                null
+        )
     }
 
-
+    private val musicPlayerAudioAttributes = AudioAttributes.Builder()
+            .setContentType(C.CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
 
 
     /**
-     * TODO: create a CastPlayer to handle ocmmunication with a cast session
-     *
+     * Create an Exoplayer to handle audio focus
      *
      */
+    private val exoPlayer: ExoPlayer by lazy {
+        SimpleExoPlayer.Builder(this).build().apply {
+            setAudioAttributes(musicPlayerAudioAttributes, true)
+            setHandleAudioBecomingNoisy(true)
+            addListener(playerListener)
+        }
+    }
+
+    //TODO: implement cast player to handle communication with a cast session
 
 
-    @RequiresApi(Build.VERSION_CODES.M)
     @ExperimentalCoroutinesApi
     override fun onCreate(){
         super.onCreate()
         Log.d(TAG, "onCreate")
-
 
         //Build a PendingIntent that can be used to launch the UI
         val sessionActivityPendingIntent=
@@ -128,55 +117,8 @@ open class MusicService : MediaBrowserServiceCompat() {
         //Create a new MediaSession
         mediaSession = MediaSessionCompat(this, TAG)
             .apply {
-                //Enable callbacks from MediaButtons and TransportControls
-                setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
-                        or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
-                //Set an initial PlaybackState with ACTION_PLAY, so media buttons can start the player
-                stateBuilder = PlaybackStateCompat.Builder()
-                        .setActions(PlaybackStateCompat.ACTION_PLAY
-                                or PlaybackStateCompat.ACTION_PLAY_PAUSE)
-                setPlaybackState(stateBuilder.build())
-
-                //MySessionCallback() has methods that handle callbacks from a media controller
-                setCallback(object : MediaSessionCompat.Callback() {
-                    override fun onPlay() {
-                        super.onPlay()
-                        resumeMedia()
-                        buildNotification(PlaybackStatus.PLAYING)
-                    }
-
-                    override fun onPause() {
-                        super.onPause()
-                        pauseMedia()
-                        buildNotification(PlaybackStatus.PAUSED)
-                    }
-
-                    override fun onSkipToNext() {
-                        super.onSkipToNext()
-                        onSkipToNext()
-                        updateMetaData()
-                        buildNotification(PlaybackStatus.PLAYING)
-                    }
-
-                    override fun onSkipToPrevious() {
-                        super.onSkipToPrevious()
-                        onSkipToPrevious()
-                        updateMetaData()
-                        buildNotification(PlaybackStatus.PLAYING)
-                    }
-
-                    override fun onStop() {
-                        super.onStop()
-                        removeNotification()
-                        stopSelf()
-                    }
-
-                    override fun onSeekTo(pos: Long) {
-                        super.onSeekTo(pos)
-                    }
-
-                })
-                setSessionToken(sessionToken)
+              setSessionActivity(sessionActivityPendingIntent)
+                isActive=true
             }
 
         /**
@@ -188,11 +130,8 @@ open class MusicService : MediaBrowserServiceCompat() {
          * returns, or the connection will fail silently. (The system will not even call
          * [MediaBrowserCompat.ConnectionCallback.onConnectionFailed].)
          */
+        sessionToken = mediaSession.sessionToken
 
-        packageValidator= PackageValidator(this, R.xml.allowed_media_browser_callers)
-        storage = PersistentStorage.getInstance(applicationContext)
-
-        Log.d(TAG, "goign to load audio")
         var musicCatalog=loadAudio()
 
         mediaSource = LocalMusicSource(musicCatalog)
@@ -201,19 +140,23 @@ open class MusicService : MediaBrowserServiceCompat() {
             mediaSource.load()
         }
 
-
-        //Manage incoming phone calls during playback
-        callStateListener()
-        //change in audio outputs
-        //registerBecomingNoisyReceiver()
-        //play new audio
-        //registerPlayNewAudio()
+        //ExoPlayer manages the MediaSession
+        mediaSessionConnector = MediaSessionConnector(mediaSession)
+        mediaSessionConnector.setPlaybackPreparer(MusicPlayerPlaybackPreparer())
+        mediaSessionConnector.setQueueNavigator(MusicPlayerQueueNavigator(mediaSession))
 
 
+        switchToPlayer(
+                previousPlayer = null,
+                        //TODO: add support for cast player
+                newPlayer = exoPlayer
+        )
 
 
+        //TODO: add notification manager
+        packageValidator= PackageValidator(this, R.xml.allowed_media_browser_callers)
+        storage = PersistentStorage.getInstance(applicationContext)
     }
-
 
     override fun onGetRoot(
             clientPackageName: String,
@@ -306,77 +249,6 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
 
-
-
-    //Handle incoming calls
-    private fun callStateListener(){
-        //Get telephony manager
-        telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
-        //Start listening for phonestate changes
-        phoneStateListener = object : PhoneStateListener(){
-            override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                when(state){
-                    //if at least one call exists or the phone is ringing pause the MediaPlayer
-                    TelephonyManager.CALL_STATE_OFFHOOK, TelephonyManager.CALL_STATE_RINGING-> if(currentPlayer != null){
-                        pauseMedia()
-                        ongoingCall=true
-                    }
-                    //Phone idle. start playing
-                    TelephonyManager.CALL_STATE_IDLE ->
-                        if(currentPlayer!=null){
-                            if(ongoingCall){
-                                ongoingCall=false
-                                resumeMedia()
-                            }
-                        }
-                }
-            }
-        }
-        //Register the listener with the telephony manager
-        //Listen for changes to the device call state
-        telephonyManager!!.listen(phoneStateListener,PhoneStateListener.LISTEN_CALL_STATE)
-    }
-
-    //Becoming noisy
-   private val becomingNoiseReceiver: BroadcastReceiver = object: BroadcastReceiver(){
-        override fun onReceive(context: Context, intent: Intent) {
-            TODO("Not yet implemented")
-        }
-   }
-   private fun registerBecomingNoisyReceiver(){
-        //register after getting audio focus
-        var intentFilter: IntentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        registerReceiver(becomingNoiseReceiver,intentFilter)
-   }
-
-   /* private val playNewAudio= object : BroadcastReceiver(){
-        //TODO: make this compatable with persistent storage and musicsource
-        override fun onReceive(context: Context?, intent: Intent?) {
-            //get the new media index from from SharedPReferences
-            audioIndex = StorageUtil(applicationContext).loadAudioIndex()
-            if(audioIndex != -1 && audioIndex < audioList!!.size){
-                //index is in valid range
-                activeAudio= audioList!![audioIndex]
-            }else{
-                stopSelf()
-            }
-            //A PLAY_NEW_AUDIO action received
-            //reset mediaPlayer to play the new audio
-            stopMedia()
-            currentPlayer?.reset()
-            initMediaPlayer()
-            updateMetaData()
-            buildNotification(PlaybackStatus.PLAYING)
-        }
-    }
-
-    private fun registerPlayNewAudio(){
-        //register playNewMedia receiver
-        var filter = IntentFilter(BROADCAST_PLAY_NEW_AUDIO)
-        registerReceiver(playNewAudio,filter)
-    }*/
-
-    @SuppressLint("NewApi")
     private  fun loadAudio(): String {
         //Container for info about each audio file
         Log.d(TAG, "loadAudio started")
@@ -473,48 +345,286 @@ open class MusicService : MediaBrowserServiceCompat() {
         return jsonMusicCatalog
     }
 
-    private fun removeNotification(){
-        var notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(NOTIFICATION_ID)
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        saveRecentSongToStorage()
+        super.onTaskRemoved(rootIntent)
+
+        /**
+         * By stopping the playback, the player will transition to the [STATE_IDLE] triggering
+         * [Player.EventListener.onPlayerStateChanged] to be called. This will cause the notification
+         * to be hidden and trigger
+         * [PlayerNotificationManager.NotificationListener.onNotificationCancelled] tp be ca;;ed
+         * The service will then remove itself as a foreground service and will call [stopSelf]
+         */
+        currentPlayer.stop(true)
     }
 
-    private fun updateMetaData() {
-        var albumArt = BitmapFactory.decodeResource(resources, R.drawable.default_art) //TODO: replace with medias album art
-        //update current metadata
-        mediaSession.setMetadata(
-                MediaMetadataCompat.Builder()
-                        .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, albumArt)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentPlayListItems[currentPlayer.currentPosition].artist)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentPlayListItems[currentPlayer.currentPosition].album)
-                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentPlayListItems[currentPlayer.currentPosition].title)
-                        .build()
-                //FIXME: make current audio object or fix above to ensure we get the current audio that is playing
-        )
+    override fun onDestroy() {
+        mediaSession.run {
+            isActive = false
+            release()
+        }
+
+        //Cancel coroutines since service is destroyed
+        serviceJob.cancel()
+
+        //Free ExoPlayer resources
+        exoPlayer.removeListener(playerListener)
+        exoPlayer.release()
     }
 
-    private fun pauseMedia(){
-        if(currentPlayer == null) return
-        if(currentPlayer.isPlaying){
-            currentPlayer.stop()
+    override fun onSearch(query: String, extras: Bundle?, result: Result<List<MediaItem>>) {
+        val resultSent = mediaSource.whenReady { successfullyInitialized ->
+            if(successfullyInitialized){
+                val resultList = mediaSource.search(query,extras ?: Bundle.EMPTY)
+                        .map { mediaMetadata ->
+                            MediaItem(mediaMetadata.description,mediaMetadata.flag)
+                        }
+                result.sendResult(resultList)
+            }
+        }
+        if(!resultSent){
+            result.detach()
         }
     }
 
-    private fun resumeMedia(){
-        if(!currentPlayer.isPlaying){
-            currentPlayer.seekTo(resumePosition!!)
-            currentPlayer.start()
+    /**
+     * Put list of songs and the song to play into the current player
+     */
+
+    private fun preparePlaylist(
+            metadataList: List<MediaMetadataCompat>,
+            itemToPlay: MediaMetadataCompat?,
+            playWhenReady: Boolean,
+            playbackStartPositionMs: Long
+    ){
+        /**
+         * Since the playlist is based on some order (i.e. tracks on an album, artists), find which
+         * window index to play first so that the song the user want to hear is played first
+         */
+
+        val initialWindowIndex= if(itemToPlay==null) 0 else metadataList.indexOf(itemToPlay)
+        currentPlayer.playWhenReady = playWhenReady
+        currentPlayer.stop(true)
+        if(currentPlayer== exoPlayer){
+            val mediaSource = metadataList.toMediaSource(dataSourceFactory)
+            exoPlayer.prepare(mediaSource)
+            exoPlayer.seekTo(initialWindowIndex,playbackStartPositionMs)
+        }else/* currentPlayer == castPlayer*/{
+            //TODO: load playlist into castPlayer
         }
     }
-    fun buildNotification(any: Any) {
-        //TODO
+
+    private fun switchToPlayer(previousPlayer: Player?, newPlayer: Player){
+        if (previousPlayer==newPlayer){
+            return
+        }
+        currentPlayer=newPlayer
+        if(previousPlayer != null){
+            val playbackState = previousPlayer.playbackState
+            if(currentPlayListItems.isEmpty()){
+                //We are joining a playback session. Loading the session from the new player is
+                //not supported, so we stop playback
+                currentPlayer.stop(true)
+            }else if (playbackState != Player.STATE_IDLE && playbackState != Player.STATE_ENDED){
+                preparePlaylist(
+                        metadataList = currentPlayListItems,
+                        itemToPlay = currentPlayListItems[previousPlayer.currentWindowIndex],
+                        playWhenReady = previousPlayer.playWhenReady,
+                        playbackStartPositionMs = previousPlayer.currentPosition
+                )
+            }
+        }
+        mediaSessionConnector.setPlayer(newPlayer)
+        previousPlayer?.stop(true)
     }
+    /**
+     *Get the current song details before saving them on a separate thread, otherwise the current
+     * player may have been unloaded by the time the save routine runs.
+     */
+    private fun saveRecentSongToStorage(){
+        val description = currentPlayListItems[currentPlayer.currentWindowIndex].description
+        val position = currentPlayer.currentPosition
+
+        serviceScope.launch {
+            storage.saveRecentSong(description,position)
+        }
+    }
+
+    private inner class MusicPlayerQueueNavigator(mediaSession: MediaSessionCompat) : TimelineQueueNavigator(mediaSession){
+        override fun getMediaDescription(player: Player, windowIndex: Int): MediaDescriptionCompat =
+            currentPlayListItems[windowIndex].description
+    }
+
+    /**
+     * Support prepare/playing from search, as well as media ID.
+     * Actions are declared in class below
+     */
+    private inner class MusicPlayerPlaybackPreparer : MediaSessionConnector.PlaybackPreparer{
+        override fun onCommand(player: Player,
+                               controlDispatcher: ControlDispatcher,
+                               command: String,
+                               extras: Bundle?,
+                               cb: ResultReceiver?): Boolean = false
+
+        override fun getSupportedPrepareActions(): Long =
+                PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or
+                        PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                        PlaybackStateCompat.ACTION_PREPARE_FROM_SEARCH or
+                        PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
+
+        override fun onPrepare(playWhenReady: Boolean) {
+            val recentSong = storage.loadRecentSong() ?: return
+            onPrepareFromMediaId(recentSong.mediaId!!,playWhenReady,recentSong.description.extras)
+        }
+
+        override fun onPrepareFromMediaId(mediaId: String, playWhenReady: Boolean, extras: Bundle?) {
+            mediaSource.whenReady {
+                val itemToPlay: MediaMetadataCompat? = mediaSource.find { item ->
+                    item.id==mediaId
+                }
+                if (itemToPlay == null) {
+                    Log.w(TAG, "Content not found: MediaID=$mediaId")
+                    //TODO: Notify caller of the error
+                }else{
+                    val playbackStartPositionMs =
+                            extras?.getLong(MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                            C.TIME_UNSET)?: C.TIME_UNSET
+
+                    preparePlaylist(buildPlaylist(itemToPlay),itemToPlay,playWhenReady,playbackStartPositionMs)
+                }
+            }
+        }
+
+        /**
+         * Builds a playlist from [MediaMetadataCompat]
+         *
+         * TODO: Support building playlist by artist, genre, etc
+         *
+         * @param item Item to base the playlist on
+         * @return a [List] of [MediaMetadataCompat] objects representing a playlist
+         */
+        private fun buildPlaylist(item: MediaMetadataCompat): List<MediaMetadataCompat> =
+                mediaSource.filter { it.album == item.album }.sortedBy { it.trackNumber }
+
+
+        /**
+         * This method is used by Google Assistant to respond to requests like:
+         * -Play Look at sky from Nurture on MyPlayer
+         * -Play edm on MyPlayer
+         * -Play music on MyPlayer
+         */
+        override fun onPrepareFromSearch(query: String, playWhenReady: Boolean, extras: Bundle?) {
+            mediaSource.whenReady {
+                val metadataList = mediaSource.search(query,extras ?: Bundle.EMPTY)
+                if(metadataList.isNotEmpty()){
+                    preparePlaylist(metadataList,metadataList[0],playWhenReady,playbackStartPositionMs = C.TIME_UNSET)
+                }
+            }
+        }
+
+        override fun onPrepareFromUri(uri: Uri, playWhenReady: Boolean, extras: Bundle?)  = Unit
+
+    }
+
+    /**
+     * Listener for notification events
+     */
+    private inner class PlayNotificationListener : PlayerNotificationManager.NotificationListener{
+        override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
+            if (ongoing && !isForegroundService){
+                ContextCompat.startForegroundService(applicationContext,
+                        Intent(applicationContext,this@MusicService.javaClass)
+                )
+
+                startForeground(notificationId, notification)
+                isForegroundService= true
+            }
+        }
+
+        override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
+            stopForeground(true)
+            isForegroundService = false
+            stopSelf()
+        }
+    }
+
+    /**
+     * Listener for events from ExoPlayer
+     */
+
+    private inner class PlayerEventListener : Player.EventListener {
+        override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
+            when(playbackState){
+                Player.STATE_BUFFERING,
+                    Player.STATE_READY->{
+                        //TODO: add in notificaiton maanger for player
+                        if(playbackState == Player.STATE_READY){
+                            /**
+                             * When playing or paused save the current media item in
+                             * [PersistentStorage] so that playback can be resumed betweeen device
+                             * reboots.
+                             */
+                            saveRecentSongToStorage()
+
+                            if(!playWhenReady){
+                                /**
+                                 * If playback is paused we remove the foreground state which allows
+                                 * the notification to be dismissed.
+                                 * TODO: Maybe make a "close" button in the notification which stops
+                                 * playback and clears the notification
+                                 */
+                                stopForeground(false)
+                            }
+                        }
+                    }
+                else -> {
+                    //TODO: hide notification
+                }
+            }
+        }
+
+
+        override fun onPlayerError(error: ExoPlaybackException) {
+            var message = R.string.generic_error
+            when (error.type) {
+                /*If the data from the MediaSource object could not be loaded the Exoplayer raises
+                * a type_source error.
+                * An error message is printed to the UI via a Toast
+                */
+                ExoPlaybackException.TYPE_SOURCE -> {
+                    message= R.string.media_not_found_error
+                    Log.e(TAG, "TYPE_SOURCE: " + error.sourceException.message)
+                }
+                //If the error occurs in a render component, Exoplayer will raise a type_remote error
+                ExoPlaybackException.TYPE_RENDERER ->{
+                    Log.e(TAG,"TYPE_RENDERER: " + error.rendererException.message)
+                }
+                //Unexpected RuntimeException ExoPlayer raises a type_unexpected error
+                ExoPlaybackException.TYPE_UNEXPECTED -> {
+                    Log.e(TAG, "TYPE_UNEXPECTED: "+ error.unexpectedException.message)
+                }
+                ExoPlaybackException.TYPE_OUT_OF_MEMORY -> {
+                    Log.e(TAG, "TYPE_OUT_OF_MEMORY: " + error.outOfMemoryError.message)
+                }
+                ExoPlaybackException.TYPE_REMOTE -> {
+                    Log.e(TAG, "TYPE_REMOTE: " + error.message)
+                }
+            }
+            Toast.makeText(applicationContext,message,Toast.LENGTH_LONG).show()
+
+        }
+    }
+
+    //TODO: implement cast listener
 
 }
 
 
-val MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS = "playback_start_position_ms"
+/**
+ * Media Sesssion events
+ */
 const val NETWORK_FAILURE = "com.example.myplayer.media.session.NETWORK_FAILURE"
-private const val TAG="MusicService"
 
 /** Content styling constants*/
 private const val CONTENT_STYLE_BROWSABLE_HINT= "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
@@ -523,6 +633,11 @@ private const val CONTENT_STYLE_SUPPORTED = "android.media.browse.CONTENT_STYLE_
 private const val CONTENT_STYLE_LIST = 1
 private const val CONTENT_STYLE_GRID = 2
 
+val MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS = "playback_start_position_ms"
+
+private const val USER_AGENT="myplayer.next"
+
 private const val BROADCAST_PLAY_NEW_AUDIO="com.exmaple.myplayer.common.PlayNewAudio"
 
+private const val TAG="MusicService"
 

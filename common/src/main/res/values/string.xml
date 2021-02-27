@@ -19,6 +19,8 @@
     <string name="play_pause">play or pause</string>
     <string name="skip_next">skip to next</string>
     <string name="skip_prev">skip to previous</string>
+    <string name="generic_error">Uh Oh! The application has encountered an unexpected error.</string>
+    <string name="media_not_found_error"> could not located requested media</string>
 
 
 
