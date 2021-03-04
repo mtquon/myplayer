@@ -94,6 +94,7 @@ class LocalMusicSource(private val sourceCat: String) : AbstractMusicSource(){
             Log.d(TAG,"MediaMetaDataCompats media description: ${mediaMetadataCompats.forEach { it.description }}")
 
 
+
             mediaMetadataCompats.forEach{it.description.extras?.putAll(it.bundle)}
             mediaMetadataCompats
         }

@@ -8,4 +8,16 @@
     <string name="hello_world">Hello Square World!</string>
     <string name="channel_name">PlaybackStatus</string>
     <string name="channel_description">build notification according to the PlaybackStatus</string>
+
+    <string name="skip_back_10s">Skip back 10s</string>
+    <string name="skip_forward_19s">Skip forwards 10s</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+
+    <string name="menu_music_queue">Queue</string>
+    <string name="album_art_alt">Album art</string>
+    <string name="duration_unkown">--:--</string>
+    <string name="duration_format">%d:%02d</string>
+
+
 </resources>

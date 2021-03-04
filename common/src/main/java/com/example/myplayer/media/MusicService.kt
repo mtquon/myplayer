@@ -403,7 +403,9 @@ open class MusicService : MediaBrowserServiceCompat() {
          * window index to play first so that the song the user want to hear is played first
          */
 
+        Log.d(TAG, "preparing playlist")
         val initialWindowIndex= if(itemToPlay==null) 0 else metadataList.indexOf(itemToPlay)
+        currentPlayListItems = metadataList
         currentPlayer.playWhenReady = playWhenReady
         currentPlayer.stop(true)
         if(currentPlayer== exoPlayer){
@@ -452,8 +454,10 @@ open class MusicService : MediaBrowserServiceCompat() {
     }
 
     private inner class MusicPlayerQueueNavigator(mediaSession: MediaSessionCompat) : TimelineQueueNavigator(mediaSession){
-        override fun getMediaDescription(player: Player, windowIndex: Int): MediaDescriptionCompat =
+
+        override fun getMediaDescription(player: Player, windowIndex: Int): MediaDescriptionCompat=
             currentPlayListItems[windowIndex].description
+
     }
 
     /**

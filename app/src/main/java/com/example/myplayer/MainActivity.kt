@@ -1,35 +1,38 @@
 package com.example.myplayer
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.*
 import android.content.pm.PackageManager
-import android.database.CursorWindow
-import android.net.Uri
-import android.os.Build
+import android.media.AudioManager
+
 import android.os.Bundle
-import android.os.IBinder
-import android.provider.MediaStore
+
 import android.provider.MediaStore.*
-import android.util.Log
 import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.widget.ImageView
+
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.example.myplayer.MediaPlayerService.LocalBinder
-import com.google.android.material.floatingactionbutton.FloatingActionButton
+import androidx.lifecycle.Observer
+
+import com.example.myplayer.fragments.MediaItemFragment
+import com.example.myplayer.utils.InjectorUtils
+import com.example.myplayer.viewmodels.MainActivityViewModel
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
 
 
 class MainActivity : AppCompatActivity() {
-    var collapsingImageView: ImageView? = null
-    private var player: MediaPlayerService? = null
-    var serviceBound: Boolean = false
-    var audioList = mutableListOf<com.example.myplayer.Audio>()
+
+    private val viewModel by viewModels<MainActivityViewModel>{
+        InjectorUtils.provideMainActivityViewModel(this)
+    }
+
+    private var castContext: CastContext? = null
+
     var  requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()){ isGranted: Boolean ->
             if(isGranted){
                 //Permission is granted
@@ -41,197 +44,93 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    companion object{
-        public const val Broadcast_PLAY_NEW_AUDIO = "com.example.myplayer.playNewAudio"
-
-    }
 
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+
+        //TODO: Initialize cast context
+
         setContentView(R.layout.activity_main)
-        var toolbar= findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar) as androidx.appcompat.widget.Toolbar
-        setSupportActionBar(toolbar)
-        collapsingImageView = findViewById(R.id.collapsingImageView) as ImageView
 
-        loadCollapsingImage(0)
+        //Ensure volume controls on phone can adjust the music volume while using app
+        volumeControlStream = AudioManager.STREAM_MUSIC
 
+        //Get permissions for reading local music files
         askPermission()
-        loadAudio()
-        initRecyclerView()
-        var fab= findViewById<FloatingActionButton>(R.id.fab)
-        fab.setOnClickListener {
-        loadCollapsingImage(0)
-        }
 
-    }
-
-   private  fun initRecyclerView(){
-
-       if(audioList.size > 0){
-           var rv = findViewById<RecyclerView>(R.id.recyclerview)
-           var adapter = RecyclerView_Adapter(audioList, application)
-           rv.adapter= adapter
-           rv.layoutManager = LinearLayoutManager(this)
-           rv.addOnItemTouchListener(CustomTouchListener(this, object : OnItemClickListener {
-               override fun onClick(view: View, index: Int) {
-                   playAudio(index)
-               }
-           }))
-
-       }
-   }
-
-    private fun loadCollapsingImage(i: Int){
-        var array = resources.obtainTypedArray(R.array.images)
-        collapsingImageView?.setImageDrawable(array.getDrawable(i))
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        //Inflate the menu. This adds items to the action bar if it is present
-        menuInflater.inflate(R.menu.menu_main, menu)
-        return true
-
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        //Handle action bar item clicks here
-        //The action bar will automatically handle clicks on the Home/Up button, so long as we specify a parent activity in AndroidManifest.xml
-        var id = item.itemId
-
-        //noinspection SimplifiableIfStatement
-        if(id == R.id.action_settings){
-            return true
-        }
-        return super.onOptionsItemSelected(item)
-    }
-
-
-    //Binding this Client to the AudioPlayer service
-    private var serviceConnection: ServiceConnection? = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder){
-            //We've bound to LocalService, cast the IBinder and get LocalService instance
-            val binder = service as LocalBinder
-            player = binder.getService()
-            serviceBound = true
-            Toast.makeText(this@MainActivity, "Service Bound", Toast.LENGTH_SHORT).show()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName){
-            serviceBound = false
-        }
-    }
-
-    private fun playAudio(audioIndex: Int){
-        //Check if service is active
-        if(!serviceBound){
-            //Store Serializable audioList to SharedPreferences
-            var storage= StorageUtil(applicationContext)
-            storage.storeAudio(audioList!! as ArrayList<Audio>)
-            storage.storeAudioIndex(audioIndex)
-
-            val playerIntent = Intent(this, MediaPlayerService::class.java)
-            startService(playerIntent)
-            bindService(playerIntent, serviceConnection!!, Context.BIND_AUTO_CREATE)
-
-        }else{
-            //Store the new audioIndex to SharedPreferences
-            var storage = StorageUtil(applicationContext)
-            storage.storeAudioIndex(audioIndex)
-
-            //Service is active
-            //Send media with Broadcast Receiver
-            var broadcastIntent= Intent(Broadcast_PLAY_NEW_AUDIO)
-            sendBroadcast(broadcastIntent)
-        }
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("ServiceState", serviceBound)
-        super.onSaveInstanceState(outState)
-    }
-
-    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
-        super.onRestoreInstanceState(savedInstanceState)
-        serviceBound = savedInstanceState.getBoolean("ServiceState")
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if(serviceBound){
-            unbindService(serviceConnection!!)
-            //service is active
-            player!!.stopSelf()
-        }
-    }
-
-    private fun loadAudio(){
-        //Container for info about each audio file
-
-
-        val collection =
-                if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q){
-                    MediaStore.Audio.Media.getContentUri(
-                            MediaStore.VOLUME_EXTERNAL
-                    )
-                }else{
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-
-                }
-
-        //show only music files
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
-
-        //Display audio files in alphabetical order based on their display name
-        val sortOrder= "${MediaStore.Audio.Media.TITLE} ASC"
-
-
-        val query = contentResolver.query(
-                collection,
-                null,
-                null,
-                null,
-                sortOrder
-        )
-
-        Log.d("query", "query size is ${query?.columnCount}")
-
-
-        query?.use { cursor ->
-            //Cache column indices
-            val idColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val albumColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val artistColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val dataColumn= cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
-
-            while (cursor.moveToNext()){
-                //Get values of columns for a given audio
-                val data = cursor.getString(dataColumn)
-                val title = cursor.getString(titleColumn)
-                val album = cursor.getString(albumColumn)
-                val artist = cursor.getString(artistColumn)
-                val id = cursor.getLong(idColumn)
-
-                val contentUri: Uri = ContentUris.withAppendedId(
-                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
+        /**
+         * Observe [MainActivityViewModel.navigateToFragment] fpr [Event]s that request a fragment
+         * swap
+         */
+        viewModel.navigateToFragment.observe(this, Observer {
+            it?.getContentIfNotHandled()?.let { fragmentNavigationRequest ->
+                val transaction = supportFragmentManager.beginTransaction()
+                transaction.replace(
+                        R.id.fragmentContainer, fragmentNavigationRequest.fragment,
+                        fragmentNavigationRequest.tag
                 )
-                Log.d("query", "DATA: ${data}")
-                Log.d("query", "TITLE: ${title}")
-                Log.d("query", "ALBUM: ${album}")
-                Log.d("query", "ARTIST: ${artist}")
-                Log.d("query", "ID: ${id}")
-
-
-                //Stores column values and the contentUri in a local object that represent the media file
-                audioList.plusAssign(Audio(data, title, album, artist, contentUri.toString()))
-
+                if(fragmentNavigationRequest.backStack) transaction.addToBackStack(null)
+                transaction.commit()
             }
-        }
+        })
 
+        /**
+         * Observe changes to [MainActivityViewModel.rootMediaId]. When app starts, and UI connects
+         * to [MusicService], this will be updated and the app wil show the initial list of
+         * media items
+         */
+
+        viewModel.rootMediaId.observe(this,
+            Observer<String> { rootMediaId->
+                rootMediaId?.let { navigateToMediaItem(it) }
+            })
+
+        /**
+         * Observe [MainActivityViewModel.navigateToMediaItem] for [Event]s indicating
+         * the user has request to browse to a difference [MediaItemData]
+         */
+
+        viewModel.navigateToMediaItem.observe(
+                this,
+                Observer {
+                    it?.getContentIfNotHandled()?.let { mediaId ->
+                        navigateToMediaItem(mediaId)
+                    }
+                }
+        )
     }
 
+    @Override
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        super.onCreateOptionsMenu(menu)
+        menuInflater.inflate(R.menu.main_activity_menu,menu)
+        /**
+         * Set up a MediaRouteButton to allow the user to control the current media playback route
+         */
+        CastButtonFactory.setUpMediaRouteButton(this, menu, R.id.media_route_menu_item)
+        return true
+    }
+
+    private fun navigateToMediaItem(mediaId: String){
+        var fragment: MediaItemFragment? = getBrowseFragment(mediaId)
+        if(fragment==null){
+            fragment = MediaItemFragment.newInstance(mediaId)
+            //If this is not the top level media (root) we add it to the fragment back stack,
+            //so that the actionbar toggle and Back will work properly
+            viewModel.showFragment(fragment, !isRootId(mediaId),mediaId)
+        }
+    }
+
+    private fun isRootId(mediaId: String)= mediaId == viewModel.rootMediaId.value
+
+    private fun getBrowseFragment(mediaId: String): MediaItemFragment? {
+        return supportFragmentManager.findFragmentByTag(mediaId) as MediaItemFragment?
+    }
+
+    @SuppressLint("NewApi")
     private fun askPermission(){
         when{
             ContextCompat.checkSelfPermission(
